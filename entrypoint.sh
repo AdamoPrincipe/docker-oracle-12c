@@ -2,7 +2,9 @@
 set -e
 
 # Prevent owner issues on mounted folders
-chown -R oracle:dba /u01/app/oracle
+
+mkdir /u01/oradata 
+chown -R oracle:dba /u01
 rm -f /u01/app/oracle/product
 ln -s /u01/app/oracle-product /u01/app/oracle/product
 
@@ -12,12 +14,14 @@ echo | /u01/app/oracle/product/12.1.0/xe/root.sh > /dev/null 2>&1 || true
 
 if [ -z "$CHARACTER_SET" ]; then
 	if [ "${USE_UTF8_IF_CHARSET_EMPTY}" == "true" ]; then
-		export CHARACTER_SET="AL32UTF8"
+		export CHARACTER_SET="AMERICAN_AMERICA.WE8MSWIN1252"
 	fi
 fi
+#NLS_NCHAR_CHARACTERSET=AL16UTF16
+#NLS_LANG= AMERICAN_AMERICA.WE8MSWIN1252
 
 if [ -n "$CHARACTER_SET" ]; then
-	export CHARSET_MOD="NLS_LANG=.$CHARACTER_SET"
+	export CHARSET_MOD="NLS_LANG=$CHARACTER_SET"
 	export CHARSET_INIT="-characterSet $CHARACTER_SET"
 fi
 
@@ -32,19 +36,51 @@ CREATE USER IMPDP IDENTIFIED BY IMPDP;
 ALTER USER IMPDP ACCOUNT UNLOCK;
 GRANT dba TO IMPDP WITH ADMIN OPTION;
 -- New Scheme User
+CREATE TABLESPACE SANKHYA DATAFILE '/u01/oradata/sankhya_1.dbf' SIZE 1024M AUTOEXTEND ON NEXT 64M MAXSIZE UNLIMITED;
+ALTER TABLESPACE SANKHYA ADD DATAFILE '/u01/oradata/sankhya_2.dbf' SIZE 1024M AUTOEXTEND ON NEXT 64M MAXSIZE UNLIMITED;
+
+CREATE TABLESPACE SANKIND DATAFILE '/u01/oradata/sankind_1.dbf' SIZE 1024M AUTOEXTEND ON NEXT 64M MAXSIZE UNLIMITED;
+ALTER TABLESPACE SANKIND ADD DATAFILE '/u01/oradata/sankind_2.dbf' SIZE 1024M AUTOEXTEND ON NEXT 64M MAXSIZE UNLIMITED;
+
+CREATE TABLESPACE SANKLOB DATAFILE '/u01/oradata/sanklob_1.dbf' SIZE 512M AUTOEXTEND ON NEXT 64M MAXSIZE UNLIMITED;
+ALTER TABLESPACE SANKLOB ADD DATAFILE '/u01/oradata/sanklob_2.dbf' SIZE 512M AUTOEXTEND ON NEXT 64M MAXSIZE UNLIMITED;
+
+
+CREATE USER DESEXTERNO IDENTIFIED BY "tecsis" DEFAULT TABLESPACE SANKHYA TEMPORARY TABLESPACE TEMP;
+GRANT RESOURCE, CONNECT TO DESEXTERNO;
+ALTER USER DESEXTERNO QUOTA UNLIMITED ON SANKHYA;
+ALTER USER DESEXTERNO QUOTA UNLIMITED ON SANKIND;
+ALTER USER DESEXTERNO QUOTA UNLIMITED ON SANKLOB;
+GRANT SELECT ON V_$SESSION TO DESEXTERNO;
+GRANT SELECT ON DBA_TABLES TO DESEXTERNO;
+GRANT CREATE SESSION TO DESEXTERNO;
+GRANT SELECT ON DBA_TAB_COLUMNS TO DESEXTERNO;
+GRANT SELECT ON DBA_CONSTRAINTS TO DESEXTERNO;
+GRANT SELECT ON DBA_TRIGGERS TO DESEXTERNO;
+GRANT SELECT ON DBA_INDEXES TO DESEXTERNO;
+GRANT SELECT ON DBA_VIEWS TO DESEXTERNO;
+GRANT SELECT ON DBA_IND_COLUMNS TO DESEXTERNO;
+GRANT SELECT ON DBA_OBJECTS TO DESEXTERNO;
+GRANT SELECT ON DBA_PROCEDURES TO DESEXTERNO;
+GRANT SELECT ON DBA_CONS_COLUMNS TO DESEXTERNO;
+GRANT CREATE ANY VIEW TO DESEXTERNO;
+GRANT DEBUG ANY PROCEDURE TO DESEXTERNO;
+GRANT DEBUG CONNECT SESSION TO DESEXTERNO;
 create or replace directory IMPDP as '/docker-entrypoint-initdb.d';
-create tablespace $DUMP_NAME datafile '/u01/app/oracle/oradata/$DUMP_NAME.dbf' size 1000M autoextend on next 100M maxsize unlimited;
-create user $DUMP_NAME identified by $DUMP_NAME default tablespace $DUMP_NAME;
-alter user $DUMP_NAME quota unlimited on $DUMP_NAME;
-alter user $DUMP_NAME default role all;
-grant connect, resource to $DUMP_NAME;
 exit;
 EOL
 
+	#wget -o /docker-entrypoint-initdb.d/DESEXTERNO.dmp  http://desbh.sankhya.com.br/files/DESEXTERNO.dmp
+	#wget -o /tmp/create.sql http://desbh.sankhya.com.br/files/create.sql
+
+	#su oracle -c "$CHARSET_MOD $ORACLE_HOME/bin/sqlplus -S / as sysdba @/tmp/create.sql"
 	su oracle -c "$CHARSET_MOD $ORACLE_HOME/bin/sqlplus -S / as sysdba @/tmp/impdp.sql"
-	su oracle -c "$CHARSET_MOD $ORACLE_HOME/bin/impdp IMPDP/IMPDP directory=IMPDP dumpfile=$DUMP_FILE $IMPDP_OPTIONS"
+	su oracle -c "$CHARSET_MOD $ORACLE_HOME/bin/impdp IMPDP/IMPDP directory=IMPDP dumpfile=DESEXTERNO.dmp SCHEMAS=DESEXTERNO $IMPDP_OPTIONS"
 	#Disable IMPDP user
 	echo -e 'ALTER USER IMPDP ACCOUNT LOCK;\nexit;' | su oracle -c "$CHARSET_MOD $ORACLE_HOME/bin/sqlplus -S / as sysdba"
+	#wget -o /tmp/create.sql http://desbh.sankhya.com.br/files/postimport.sql
+
+	echo -e 'ALTER USER DESEXTERNO identified by tecsis;\nexit;' | su oracle -c "$CHARSET_MOD $ORACLE_HOME/bin/sqlplus -S / as sysdba"
 	set -e
 }
 
